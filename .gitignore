@@ -8,3 +8,4 @@ dist/
 src-tauri/target/
 # local screenshots (keep src-tauri/icons/*.png tracked)
 /emeli-shell-*.png
+_serve.mjs
