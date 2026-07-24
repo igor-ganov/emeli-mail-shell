@@ -1,0 +1,25 @@
+---
+// Emeli-mail desktop shell — Astro + Lit UI. The same build is loaded by the
+// Tauri window (see src-tauri/tauri.conf.json → frontendDist).
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Emeli</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        block-size: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <emeli-app></emeli-app>
+    <script>
+      import '../app.ts';
+    </script>
+  </body>
+</html>

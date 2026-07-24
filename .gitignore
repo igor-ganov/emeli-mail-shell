@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.astro/
+*.log
+.DS_Store
+.env
+# Tauri
+src-tauri/target/
+# local screenshots (keep src-tauri/icons/*.png tracked)
+/emeli-shell-*.png

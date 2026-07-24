@@ -1,0 +1,38 @@
+{
+  "name": "@emeli/shell",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "description": "Emeli-mail desktop shell — Tauri + Astro/Lit composition",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "bun test src/lib",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igor-ganov/emeli-mail-shell.git"
+  },
+  "author": "igor-ganov",
+  "license": "MIT",
+  "dependencies": {
+    "@emeli/core": "file:../emeli-mail-core",
+    "@emeli/sanitize": "file:../emeli-mail-sanitize",
+    "@emeli/theme-terracotta": "file:../emeli-mail-theme-terracotta",
+    "@emeli/tokens": "file:../emeli-mail-tokens",
+    "@emeli/ui-message-body": "file:../emeli-mail-ui-message-body",
+    "@emeli/ui-message-list": "file:../emeli-mail-ui-message-list",
+    "@emeli/ui-message-row": "file:../emeli-mail-ui-message-row",
+    "astro": "^5.6.0",
+    "lit": "^3.3.2"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.9.3"
+  }
+}
