@@ -7,4 +7,5 @@ import '@emeli/theme-terracotta/message-row';
 import '@emeli/ui-message-row';
 import '@emeli/ui-message-list';
 import '@emeli/ui-message-body';
+import '@emeli/ui-compose';
 import './app-root.js';

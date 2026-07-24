@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { sanitizeHtml } from '@emeli/sanitize';
 import type { MailPort, Folder, MessageBody } from '@emeli/core';
 import type { MessageListItem } from '@emeli/ui-message-list';
+import type { SendDetail } from '@emeli/ui-compose';
 import rowThemeCss from '@emeli/theme-terracotta/message-row?raw';
 import { createMailPort } from './mail/provider.js';
 import { toListItem, textToHtml } from './lib/to-list-item.js';
@@ -59,6 +60,55 @@ export class EmeliApp extends LitElement {
       color: var(--emeli-color-text-primary, #111);
       font-weight: var(--emeli-font-weight-medium, 500);
     }
+    .compose {
+      all: unset;
+      cursor: pointer;
+      margin-inline-start: var(--emeli-space-sm, 1rem);
+      padding: 0.35rem 0.9rem;
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      background: var(--emeli-color-brand, #c0491f);
+      color: var(--emeli-color-on-brand, #fff);
+      font-weight: var(--emeli-font-weight-medium, 500);
+    }
+    emeli-compose {
+      display: block;
+      max-inline-size: 42rem;
+    }
+    emeli-compose::part(field) {
+      margin-block-end: var(--emeli-space-sm, 1rem);
+    }
+    emeli-compose::part(label) {
+      font-size: var(--emeli-font-size-sm, 0.875rem);
+      color: var(--emeli-color-text-secondary, #555);
+    }
+    emeli-compose::part(input),
+    emeli-compose::part(textarea) {
+      padding: 0.45rem;
+      border: 1px solid var(--emeli-color-border, #ccc);
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      background: var(--emeli-color-surface-elevated, #fff);
+      color: inherit;
+    }
+    emeli-compose::part(actions) {
+      display: flex;
+      gap: var(--emeli-space-xs, 0.5rem);
+      margin-block-start: var(--emeli-space-sm, 1rem);
+    }
+    emeli-compose::part(send) {
+      padding: 0.45rem 1rem;
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      background: var(--emeli-color-brand, #c0491f);
+      color: var(--emeli-color-on-brand, #fff);
+    }
+    emeli-compose::part(cancel) {
+      padding: 0.45rem 1rem;
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      border: 1px solid var(--emeli-color-border, #ccc);
+    }
+    emeli-compose::part(errors) {
+      color: var(--emeli-color-danger, #c0392b);
+      font-size: var(--emeli-font-size-sm, 0.875rem);
+    }
     .panes {
       display: grid;
       grid-template-columns: 1fr;
@@ -107,6 +157,8 @@ export class EmeliApp extends LitElement {
   @state() private bodyHtml = '';
   @state() private bodyBlocked = 0;
   @state() private bodyAllowRemote = false;
+  @state() private composing = false;
+  @state() private sending = false;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -170,8 +222,34 @@ export class EmeliApp extends LitElement {
     if (this.rawBody !== undefined) this.renderBody(this.rawBody, true);
   };
 
+  private startCompose = (): void => {
+    this.composing = true;
+  };
+
+  private cancelCompose = (): void => {
+    this.composing = false;
+  };
+
+  private onSend = async (event: CustomEvent<SendDetail>): Promise<void> => {
+    this.sending = true;
+    const receipt = await this.port.send(event.detail.draft);
+    this.sending = false;
+    this.composing = false;
+    if (receipt.ok) await this.loadFolder('sent');
+  };
+
   private get selectedItem(): MessageListItem | undefined {
     return this.items.find((i) => i.id === this.selectedId);
+  }
+
+  private renderCompose() {
+    return html`
+      <emeli-compose
+        .sending=${this.sending}
+        @emeli-send=${this.onSend}
+        @emeli-cancel=${this.cancelCompose}
+      ></emeli-compose>
+    `;
   }
 
   private renderReader() {
@@ -204,6 +282,7 @@ export class EmeliApp extends LitElement {
             </button>
           `,
         )}
+        <button class="compose" @click=${this.startCompose}>Compose</button>
       </header>
       <div class="panes">
         <div class="list">
@@ -213,7 +292,7 @@ export class EmeliApp extends LitElement {
             @emeli-select=${(e: CustomEvent<{ id: string }>) => this.open(e.detail.id)}
           ></emeli-message-list>
         </div>
-        <div class="reader">${this.renderReader()}</div>
+        <div class="reader">${this.composing ? this.renderCompose() : this.renderReader()}</div>
       </div>
     `;
   }

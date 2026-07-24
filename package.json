@@ -24,6 +24,7 @@
     "@emeli/sanitize": "file:../emeli-mail-sanitize",
     "@emeli/theme-terracotta": "file:../emeli-mail-theme-terracotta",
     "@emeli/tokens": "file:../emeli-mail-tokens",
+    "@emeli/ui-compose": "file:../emeli-mail-ui-compose",
     "@emeli/ui-message-body": "file:../emeli-mail-ui-message-body",
     "@emeli/ui-message-list": "file:../emeli-mail-ui-message-list",
     "@emeli/ui-message-row": "file:../emeli-mail-ui-message-row",
