@@ -7,13 +7,14 @@
 //! design for a native client) — the user never configures anything.
 
 use std::net::TcpStream;
+#[cfg(desktop)]
 use std::sync::mpsc::channel;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, State};
+use tauri::AppHandle;
 #[cfg(desktop)]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
@@ -22,11 +23,11 @@ use crate::store;
 /// The redirect the mobile deep-link flow uses (custom scheme handled by the
 /// deep-link plugin). Must be registered in the Yahoo app's redirect URIs.
 const MOBILE_REDIRECT: &str = "emeli://auth/callback";
-
-/// Delivers the deep-link callback URL from the plugin handler to the awaiting
-/// mobile sign-in. Set before opening the browser, taken when the URL arrives.
-#[derive(Default)]
-pub struct AuthChannel(pub Mutex<Option<std::sync::mpsc::Sender<String>>>);
+/// Persisted PKCE state between opening the browser and the deep-link callback
+/// (survives an app restart while the user is in the browser).
+const PENDING_SERVICE: &str = "emeli-pending";
+/// Where the deep-link handler records a sign-in error for the UI to surface.
+const ERROR_SERVICE: &str = "emeli-signin-error";
 
 // Public native-client credentials (no secret).
 const CLIENT_ID: &str = "dj0yJmk9R1NjcjlKQloxTGVWJmQ9WVdrOVNEUXdSR3RaZUd3bWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PWNj";
@@ -135,19 +136,9 @@ fn fetch_email(access_token: &str) -> Result<String, String> {
 async fn authorize(app: &AppHandle, verifier_challenge: (&str, &str)) -> Result<String, String> {
     let (_verifier, challenge) = verifier_challenge;
     let state = random_state();
-    let auth_url = url::Url::parse_with_params(
-        AUTHORIZE_URL,
-        &[
-            ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
-            ("response_type", "code"),
-            ("scope", SCOPES),
-            ("state", state.as_str()),
-            ("code_challenge", challenge),
-            ("code_challenge_method", "S256"),
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+    let auth_url = build_authorize_url(challenge, &state, REDIRECT_URI)?
+        .parse::<url::Url>()
+        .map_err(|e: url::ParseError| e.to_string())?;
 
     let (tx, rx) = channel::<Result<String, String>>();
     let expected_state = state.clone();
@@ -182,78 +173,142 @@ async fn authorize(app: &AppHandle, verifier_challenge: (&str, &str)) -> Result<
     Ok(code)
 }
 
-/// `Sign in with Yahoo` (public-client PKCE, no secret). Desktop opens a login
-/// window and intercepts the redirect; mobile opens the system browser and
-/// receives the code back through the `emeli://auth/callback` deep link.
+fn build_authorize_url(challenge: &str, state: &str, redirect: &str) -> Result<String, String> {
+    url::Url::parse_with_params(
+        AUTHORIZE_URL,
+        &[
+            ("client_id", CLIENT_ID),
+            ("redirect_uri", redirect),
+            ("response_type", "code"),
+            ("scope", SCOPES),
+            ("state", state),
+            ("code_challenge", challenge),
+            ("code_challenge_method", "S256"),
+        ],
+    )
+    .map(|u| u.to_string())
+    .map_err(|e| e.to_string())
+}
+
+/// `Sign in with Yahoo` (public-client PKCE, no secret).
+///
+/// Desktop opens a login window, intercepts the redirect and completes inline.
+/// Mobile persists the PKCE state, opens the system browser and returns an empty
+/// account immediately; `handle_deep_link` completes sign-in when Yahoo returns
+/// to `emeli://auth/callback` (surviving an app restart), and the UI polls
+/// `yahoo_account` / `yahoo_signin_error`.
 #[tauri::command]
-pub async fn yahoo_sign_in(app: AppHandle, auth_channel: State<'_, AuthChannel>) -> Result<Account, String> {
-    let (verifier, challenge) = pkce();
-
-    #[cfg(desktop)]
-    let code = {
-        let _ = &auth_channel;
-        authorize(&app, (&verifier, &challenge)).await?
-    };
-
+pub async fn yahoo_sign_in(app: AppHandle) -> Result<Account, String> {
     #[cfg(mobile)]
-    let code = {
+    {
         use tauri_plugin_opener::OpenerExt;
+        let _ = store::clear_log(&app);
+        store::append_log(&app, "sign-in: start (mobile)");
+        let (verifier, challenge) = pkce();
         let state = random_state();
-        let url = url::Url::parse_with_params(
-            AUTHORIZE_URL,
-            &[
-                ("client_id", CLIENT_ID),
-                ("redirect_uri", MOBILE_REDIRECT),
-                ("response_type", "code"),
-                ("scope", SCOPES),
-                ("state", state.as_str()),
-                ("code_challenge", challenge.as_str()),
-                ("code_challenge_method", "S256"),
-            ],
-        )
-        .map_err(|e| e.to_string())?;
-        let (tx, rx) = channel::<String>();
-        *auth_channel.0.lock().map_err(|e| e.to_string())? = Some(tx);
+        let url = build_authorize_url(&challenge, &state, MOBILE_REDIRECT)?;
+        store::store(&app, PENDING_SERVICE, "yahoo", &format!("{}\n{}", verifier, state))?;
+        let _ = store::delete(&app, ERROR_SERVICE, "yahoo");
+        store::append_log(&app, &format!("sign-in: opening browser (redirect {})", MOBILE_REDIRECT));
         app.opener()
-            .open_url(url.to_string(), None::<&str>)
+            .open_url(url, None::<&str>)
             .map_err(|e| e.to_string())?;
-        let callback = tauri::async_runtime::spawn_blocking(move || rx.recv())
-            .await
-            .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())?;
-        let parsed = url::Url::parse(&callback).map_err(|e| e.to_string())?;
-        let got_state = parsed
-            .query_pairs()
-            .find(|(k, _)| k == "state")
-            .map(|(_, v)| v.into_owned());
-        if got_state.as_deref() != Some(state.as_str()) {
-            return Err("state mismatch (possible CSRF)".to_string());
+        Ok(Account { email: String::new() })
+    }
+    #[cfg(desktop)]
+    {
+        let (verifier, challenge) = pkce();
+        let code = authorize(&app, (&verifier, &challenge)).await?;
+        let token = exchange_code(&code, &verifier, REDIRECT_URI)?;
+        let email = fetch_email(&token.access_token)?;
+        let refresh = token
+            .refresh_token
+            .ok_or_else(|| "no refresh token returned".to_string())?;
+        store::store(&app, KEYRING_SERVICE, &email, &refresh)?;
+        store::store(&app, KEYRING_ACTIVE, "yahoo", &email)?;
+        Ok(Account { email })
+    }
+}
+
+/// Log a URL without leaking the authorization code.
+fn redact(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(u) => {
+            let params: Vec<String> = u
+                .query_pairs()
+                .map(|(k, v)| {
+                    if k == "code" {
+                        format!("{}=<redacted>", k)
+                    } else {
+                        format!("{}={}", k, v)
+                    }
+                })
+                .collect();
+            format!("{}://{}{}?{}", u.scheme(), u.host_str().unwrap_or(""), u.path(), params.join("&"))
         }
+        Err(_) => "<unparseable url>".to_string(),
+    }
+}
+
+/// Complete a mobile sign-in from the deep-link callback, logging each step.
+pub fn handle_deep_link(app: &AppHandle, url: &str) {
+    store::append_log(app, &format!("deep-link received: {}", redact(url)));
+    if let Err(e) = complete_deep_link(app, url) {
+        store::append_log(app, &format!("sign-in ERROR: {}", e));
+        let _ = store::store(app, ERROR_SERVICE, "yahoo", &e);
+    }
+}
+
+fn complete_deep_link(app: &AppHandle, url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
+    let find = |key: &str| {
         parsed
             .query_pairs()
-            .find(|(k, _)| k == "code")
+            .find(|(k, _)| k == key)
             .map(|(_, v)| v.into_owned())
-            .ok_or_else(|| "no code in callback".to_string())?
     };
-
-    let redirect = if cfg!(mobile) { MOBILE_REDIRECT } else { REDIRECT_URI };
-    let token = exchange_code(&code, &verifier, redirect)?;
+    if let Some(err) = find("error") {
+        let desc = find("error_description").unwrap_or_default();
+        return Err(format!("Yahoo returned '{}' {}", err, desc));
+    }
+    let code = find("code").ok_or_else(|| "callback had no ?code".to_string())?;
+    let state = find("state").ok_or_else(|| "callback had no ?state".to_string())?;
+    let pending = store::load(app, PENDING_SERVICE, "yahoo")?
+        .ok_or_else(|| "no pending sign-in (lost on restart?)".to_string())?;
+    let mut lines = pending.lines();
+    let verifier = lines
+        .next()
+        .ok_or_else(|| "bad pending record".to_string())?
+        .to_string();
+    let saved_state = lines.next().unwrap_or("").to_string();
+    if saved_state != state {
+        return Err("state mismatch (possible CSRF)".to_string());
+    }
+    store::append_log(app, "exchanging code for token…");
+    let token = exchange_code(&code, &verifier, MOBILE_REDIRECT)?;
+    store::append_log(app, "token OK; fetching user email…");
     let email = fetch_email(&token.access_token)?;
     let refresh = token
         .refresh_token
         .ok_or_else(|| "no refresh token returned".to_string())?;
-    store::store(&app, KEYRING_SERVICE, &email, &refresh)?;
-    store::store(&app, KEYRING_ACTIVE, "yahoo", &email)?;
-    Ok(Account { email })
+    store::store(app, KEYRING_SERVICE, &email, &refresh)?;
+    store::store(app, KEYRING_ACTIVE, "yahoo", &email)?;
+    let _ = store::delete(app, PENDING_SERVICE, "yahoo");
+    let _ = store::delete(app, ERROR_SERVICE, "yahoo");
+    store::append_log(app, &format!("sign-in COMPLETE for {}", email));
+    Ok(())
 }
 
-/// Feed a received deep-link callback URL to an awaiting mobile sign-in.
-pub fn deliver_callback(channel: &AuthChannel, url: String) {
-    if let Ok(mut guard) = channel.0.lock() {
-        if let Some(tx) = guard.take() {
-            let _ = tx.send(url);
-        }
-    }
+/// The last mobile sign-in error, if any (for the UI to surface).
+#[tauri::command]
+pub fn yahoo_signin_error(app: AppHandle) -> Result<Option<String>, String> {
+    store::load(&app, ERROR_SERVICE, "yahoo")
+}
+
+/// The diagnostics log, for the user to share.
+#[tauri::command]
+pub fn yahoo_log(app: AppHandle) -> Result<String, String> {
+    store::read_log(&app)
 }
 
 /// The signed-in Yahoo account, if any.
@@ -299,14 +354,24 @@ fn tls_stream(host: &str, port: u16) -> Result<ImapTls, String> {
 /// Read the latest inbox headers over IMAP with XOAUTH2.
 #[tauri::command]
 pub fn yahoo_inbox(app: AppHandle, email: String, limit: u32) -> Result<Vec<HeaderJson>, String> {
-    let refresh = store::load(&app, KEYRING_SERVICE, &email)?
+    store::append_log(&app, &format!("imap: fetching inbox for {}", email));
+    let result = yahoo_inbox_inner(&app, &email, limit);
+    match &result {
+        Ok(v) => store::append_log(&app, &format!("imap: {} messages", v.len())),
+        Err(e) => store::append_log(&app, &format!("imap ERROR: {}", e)),
+    }
+    result
+}
+
+fn yahoo_inbox_inner(app: &AppHandle, email: &str, limit: u32) -> Result<Vec<HeaderJson>, String> {
+    let refresh = store::load(app, KEYRING_SERVICE, email)?
         .ok_or_else(|| "not signed in".to_string())?;
     let token = refresh_access(&refresh)?;
 
     let tls = tls_stream(IMAP_HOST, IMAP_PORT)?;
     let mut client = imap::Client::new(tls);
     client.read_greeting().map_err(|e| e.to_string())?;
-    let auth = XOAuth2 { user: email, access_token: token.access_token };
+    let auth = XOAuth2 { user: email.to_string(), access_token: token.access_token };
     let mut session = client
         .authenticate("XOAUTH2", &auth)
         .map_err(|(e, _)| e.to_string())?;

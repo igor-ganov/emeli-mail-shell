@@ -31,17 +31,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
-        .manage(yahoo::AuthChannel::default())
         .setup(|app| {
             #[cfg(mobile)]
             {
-                use tauri::Manager;
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let handle = app.handle().clone();
                 app.deep_link().on_open_url(move |event| {
-                    if let Some(url) = event.urls().into_iter().next() {
-                        let channel = handle.state::<yahoo::AuthChannel>();
-                        yahoo::deliver_callback(channel.inner(), url.to_string());
+                    for url in event.urls() {
+                        yahoo::handle_deep_link(&handle, url.as_str());
                     }
                 });
             }
@@ -54,6 +51,8 @@ pub fn run() {
             secure_delete,
             yahoo::yahoo_sign_in,
             yahoo::yahoo_account,
+            yahoo::yahoo_signin_error,
+            yahoo::yahoo_log,
             yahoo::yahoo_inbox
         ])
         .run(tauri::generate_context!())

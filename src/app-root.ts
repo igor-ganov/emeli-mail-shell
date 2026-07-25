@@ -10,6 +10,8 @@ import {
   isTauri,
   getYahooAccount,
   signInYahoo,
+  getSignInError,
+  getDiagnosticsLog,
   portForAccount,
 } from './mail/provider.js';
 import { toListItem, textToHtml } from './lib/to-list-item.js';
@@ -117,6 +119,66 @@ export class EmeliApp extends LitElement {
       text-overflow: ellipsis;
       white-space: nowrap;
       flex: 0 1 auto;
+    }
+    .log-open {
+      all: unset;
+      cursor: pointer;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      padding: 0.35rem 0.6rem;
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      border: 1px solid var(--emeli-color-border, #ccc);
+      color: var(--emeli-color-text-secondary, #555);
+      font-size: 0.85rem;
+    }
+    .log-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: grid;
+      place-items: center;
+      padding: 1rem;
+      z-index: 10;
+    }
+    .log-panel {
+      background: var(--emeli-color-background, #fff);
+      color: var(--emeli-color-text-primary, #111);
+      border-radius: var(--emeli-radius-md, 0.75rem);
+      padding: 0.75rem;
+      inline-size: min(100%, 40rem);
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .log-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .log-actions strong {
+      margin-inline-end: auto;
+    }
+    .log-btn {
+      all: unset;
+      cursor: pointer;
+      padding: 0.3rem 0.8rem;
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      background: var(--emeli-color-brand, #c0491f);
+      color: var(--emeli-color-on-brand, #fff);
+      font-size: 0.85rem;
+    }
+    .log-text {
+      inline-size: 100%;
+      block-size: 50vh;
+      box-sizing: border-box;
+      font-family: var(--emeli-font-mono, monospace);
+      font-size: 0.78rem;
+      border: 1px solid var(--emeli-color-border, #ccc);
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      padding: 0.5rem;
+      resize: none;
+      background: var(--emeli-color-surface, #f7f7f7);
+      color: inherit;
     }
     emeli-compose {
       display: block;
@@ -244,11 +306,19 @@ export class EmeliApp extends LitElement {
   /** Which pane is active on a narrow (mobile) screen. */
   @state() private view: 'list' | 'reader' = 'list';
   @state() private signInError: string | undefined;
+  @state() private showLog = false;
+  @state() private logText = '';
 
   override connectedCallback(): void {
     super.connectedCallback();
     this.setAttribute('data-view', 'list');
+    document.addEventListener('visibilitychange', this.onVisible);
     void this.init();
+  }
+
+  override disconnectedCallback(): void {
+    document.removeEventListener('visibilitychange', this.onVisible);
+    super.disconnectedCallback();
   }
 
   protected override updated(): void {
@@ -277,19 +347,59 @@ export class EmeliApp extends LitElement {
     await this.loadFolder(this.activeFolder);
   }
 
+  private useAccount = async (email: string): Promise<void> => {
+    this.account = email;
+    this.port = portForAccount(email);
+    await this.loadFolder('inbox');
+  };
+
   private signIn = async (): Promise<void> => {
     this.signingIn = true;
     this.signInError = undefined;
     try {
-      const account = await signInYahoo();
-      this.account = account;
-      this.port = portForAccount(account);
-      await this.loadFolder('inbox');
+      const email = await signInYahoo();
+      if (email !== '') {
+        await this.useAccount(email); // desktop: completed inline
+        return;
+      }
+      await this.pollForSignIn(); // mobile: browser opened, deep-link completes
     } catch (cause) {
       this.signInError = String(cause).replace(/^Error:\s*/, '');
     } finally {
       this.signingIn = false;
     }
+  };
+
+  /** Poll for the deep-link handler to finish the mobile sign-in. */
+  private async pollForSignIn(): Promise<void> {
+    for (let i = 0; i < 60; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const account = await getYahooAccount();
+      if (account !== undefined && account !== '') {
+        await this.useAccount(account);
+        return;
+      }
+      const error = await getSignInError();
+      if (error !== undefined) {
+        this.signInError = error;
+        return;
+      }
+    }
+    this.signInError = 'Timed out waiting for sign-in.';
+  }
+
+  /** When the app returns to the foreground, pick up a completed sign-in. */
+  private onVisible = (): void => {
+    if (document.hidden || this.account !== undefined) return;
+    void (async () => {
+      const account = await getYahooAccount();
+      if (account !== undefined && account !== '') {
+        await this.useAccount(account);
+        return;
+      }
+      const error = await getSignInError();
+      if (error !== undefined) this.signInError = error;
+    })();
   };
 
   private async loadFolder(id: string): Promise<void> {
@@ -360,6 +470,35 @@ export class EmeliApp extends LitElement {
     return this.items.find((i) => i.id === this.selectedId);
   }
 
+  private openLog = async (): Promise<void> => {
+    this.logText = await getDiagnosticsLog();
+    this.showLog = true;
+  };
+
+  private closeLog = (): void => {
+    this.showLog = false;
+  };
+
+  private copyLog = (): void => {
+    void navigator.clipboard?.writeText(this.logText);
+  };
+
+  private renderLog() {
+    if (!this.showLog) return nothing;
+    return html`
+      <div class="log-overlay" @click=${this.closeLog}>
+        <div class="log-panel" @click=${(e: Event) => e.stopPropagation()}>
+          <div class="log-actions">
+            <strong>Diagnostics log</strong>
+            <button class="log-btn" @click=${this.copyLog}>Copy</button>
+            <button class="log-btn" @click=${this.closeLog}>Close</button>
+          </div>
+          <textarea class="log-text" readonly .value=${this.logText || '(empty)'}></textarea>
+        </div>
+      </div>
+    `;
+  }
+
   private renderAccount() {
     if (this.account !== undefined) {
       return html`<span class="account" title="Signed in">${this.account}</span>`;
@@ -407,6 +546,9 @@ export class EmeliApp extends LitElement {
       <header class="bar">
         <div class="bar-top">
           <span class="brand">emeli</span>
+          ${isTauri()
+            ? html`<button class="log-open" @click=${this.openLog} title="Diagnostics log">Log</button>`
+            : nothing}
           <button class="compose" @click=${this.startCompose}>Compose</button>
           ${this.renderAccount()}
         </div>
@@ -437,6 +579,7 @@ export class EmeliApp extends LitElement {
           ${this.composing ? this.renderCompose() : this.renderReader()}
         </div>
       </div>
+      ${this.renderLog()}
     `;
   }
 }

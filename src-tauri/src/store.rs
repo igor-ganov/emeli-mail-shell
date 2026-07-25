@@ -50,3 +50,35 @@ pub fn delete(app: &AppHandle, service: &str, account: &str) -> Result<(), Strin
         Err(e) => Err(e.to_string()),
     }
 }
+
+fn log_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(secrets_dir(app)?.join("diagnostics.log"))
+}
+
+/// Append a diagnostics line (persisted to disk so it survives the app restart
+/// that can happen during the OAuth browser round-trip).
+pub fn append_log(app: &AppHandle, line: &str) {
+    if let Ok(path) = log_path(app) {
+        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
+            use std::io::Write;
+            let _ = writeln!(file, "{}", line);
+        }
+    }
+}
+
+pub fn read_log(app: &AppHandle) -> Result<String, String> {
+    match fs::read_to_string(log_path(app)?) {
+        Ok(text) => Ok(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+pub fn clear_log(app: &AppHandle) -> Result<(), String> {
+    let path = log_path(app)?;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
