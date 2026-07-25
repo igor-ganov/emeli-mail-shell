@@ -35,10 +35,17 @@ flow (and for the other providers later).
      a page for you to paste back into Emeli.
    - **API Permissions**: enable **Mail → Read** (and **Write** if you want to
      send). This is the permission that triggers Yahoo's review.
-3. Create the app. Copy the **Client ID (Consumer Key)** and **Client Secret
-   (Consumer Secret)**.
-4. Put them in `.env` (see below). If mail scope needs approval, follow Yahoo's
+3. Create the app. Copy the **Client ID (Consumer Key)** — the long `dj0y…`
+   value — and the short **App ID**. Both are **public**; a native app is a
+   **public client** and uses **PKCE**, so there is **no client secret** to hide.
+4. Put the Client ID in `.env`. If mail scope needs approval, follow Yahoo's
    prompt to request it.
+
+> Yahoo supports/requires **PKCE for public clients**: Emeli generates a
+> `code_verifier`/`code_challenge` per sign-in and exchanges the code with the
+> verifier — no secret in the client. If Yahoo registered your app as a
+> *confidential* client (issued a secret anyway), keep that secret in a Worker
+> that performs the code→token exchange and set `EMELI_TOKEN_PROXY_URL`.
 
 Endpoints Emeli uses (already wired in `@emeli/provider-yahoo`):
 - Authorize: `https://api.login.yahoo.com/oauth2/request_auth`
@@ -62,10 +69,10 @@ the WebView).
 
 ## Giving Emeli the values
 
-Copy `.env.example` → `.env` (git-ignored) and fill it in **on disk**. Put the
-**Client Secret** / **App Password** only in that file — do not paste secrets
-into chat. Non-secret values (Client ID, redirect choice, your email) are fine
-to mention directly.
+Copy `.env.example` → `.env` (git-ignored) and fill it in **on disk**. With the
+public-client/PKCE design there is no client secret at all; the Client ID and
+App ID are public. If you use an **App Password** (Path B), that one *is* a
+credential — keep it only in `.env`, never in chat.
 
 ```sh
 cp .env.example .env   # then edit .env
