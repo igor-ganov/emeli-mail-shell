@@ -30,6 +30,8 @@ const MOBILE_REDIRECT: &str = "net.thunderbird://oauth/yahoo";
 const PENDING_SERVICE: &str = "emeli-pending";
 /// Where the deep-link handler records a sign-in error for the UI to surface.
 const ERROR_SERVICE: &str = "emeli-signin-error";
+/// Cached access token (with expiry) to avoid refreshing on every IMAP call.
+const TOKEN_CACHE_SERVICE: &str = "emeli-token";
 
 // Public native-client credentials (no secret). Thunderbird's Yahoo-approved
 // public client id — the only way a non-partner app gets IMAP `mail-w`, which
@@ -65,6 +67,7 @@ pub struct HeaderJson {
 struct TokenResponse {
     access_token: String,
     refresh_token: Option<String>,
+    expires_in: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -372,15 +375,45 @@ fn decode_header(bytes: &[u8]) -> String {
     rfc2047_decoder::decode(bytes).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
 }
 
-/// Open an authenticated IMAP session (XOAUTH2 with the stored token).
-fn imap_session(app: &AppHandle, email: &str) -> Result<imap::Session<ImapTls>, String> {
+fn now_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// A valid access token — from the cache if it is still fresh, otherwise
+/// refreshed (and re-cached). Avoids a token round-trip on every IMAP call.
+fn access_token(app: &AppHandle, email: &str) -> Result<String, String> {
+    if let Some(cached) = store::load(app, TOKEN_CACHE_SERVICE, email)? {
+        let mut lines = cached.lines();
+        let token = lines.next().unwrap_or("");
+        let expires: u128 = lines.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        if !token.is_empty() && now_ms() < expires {
+            return Ok(token.to_string());
+        }
+    }
     let refresh = store::load(app, KEYRING_SERVICE, email)?
         .ok_or_else(|| "not signed in".to_string())?;
     let token = refresh_access(&refresh)?;
+    let ttl = token.expires_in.unwrap_or(3600).saturating_sub(120) as u128;
+    let expires = now_ms() + ttl * 1000;
+    let _ = store::store(
+        app,
+        TOKEN_CACHE_SERVICE,
+        email,
+        &format!("{}\n{}", token.access_token, expires),
+    );
+    Ok(token.access_token)
+}
+
+/// Open an authenticated IMAP session (XOAUTH2 with a valid access token).
+fn imap_session(app: &AppHandle, email: &str) -> Result<imap::Session<ImapTls>, String> {
+    let token = access_token(app, email)?;
     let tls = tls_stream(IMAP_HOST, IMAP_PORT)?;
     let mut client = imap::Client::new(tls);
     client.read_greeting().map_err(|e| e.to_string())?;
-    let auth = XOAuth2 { user: email.to_string(), access_token: token.access_token };
+    let auth = XOAuth2 { user: email.to_string(), access_token: token };
     client.authenticate("XOAUTH2", &auth).map_err(|(e, _)| e.to_string())
 }
 

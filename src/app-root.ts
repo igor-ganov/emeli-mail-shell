@@ -347,7 +347,13 @@ export class EmeliApp extends LitElement {
     await this.loadFolder(this.activeFolder);
   }
 
+  private accountResolved = false;
+
   private useAccount = async (email: string): Promise<void> => {
+    // Guard against a burst of concurrent callers (poll + repeated
+    // visibilitychange during the OAuth round-trip) each loading the inbox.
+    if (this.accountResolved) return;
+    this.accountResolved = true;
     this.account = email;
     this.port = portForAccount(email);
     const folders = await this.port.listFolders();
