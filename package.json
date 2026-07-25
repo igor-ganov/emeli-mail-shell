@@ -8,6 +8,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "login:yahoo": "bun run scripts/yahoo-login.ts",
     "test": "bun test src/lib",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
@@ -24,6 +25,7 @@
     "@emeli/sanitize": "file:../emeli-mail-sanitize",
     "@emeli/theme-terracotta": "file:../emeli-mail-theme-terracotta",
     "@emeli/tokens": "file:../emeli-mail-tokens",
+    "@emeli/provider-yahoo": "file:../emeli-mail-provider-yahoo",
     "@emeli/ui-compose": "file:../emeli-mail-ui-compose",
     "@emeli/ui-message-body": "file:../emeli-mail-ui-message-body",
     "@emeli/ui-message-list": "file:../emeli-mail-ui-message-list",
@@ -34,6 +36,7 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",
     "@types/bun": "^1.2.0",
+    "imapflow": "^1.0.164",
     "typescript": "^5.9.3"
   }
 }
