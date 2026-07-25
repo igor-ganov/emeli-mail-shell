@@ -29,3 +29,6 @@ webpki-roots = "0.26"
 [profile.release]
 opt-level = "s"
 lto = true
+strip = true
+codegen-units = 1
+panic = "abort"
