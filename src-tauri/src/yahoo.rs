@@ -6,12 +6,16 @@
 //! token in the OS keychain. `client_id` is an app-level constant (public by
 //! design for a native client) — the user never configures anything.
 
+use std::net::TcpStream;
 use std::sync::mpsc::channel;
+use std::sync::Arc;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
+
+use crate::store;
 
 // Public native-client credentials (no secret).
 const CLIENT_ID: &str = "dj0yJmk9R1NjcjlKQloxTGVWJmQ9WVdrOVNEUXdSR3RaZUd3bWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PWNj";
@@ -70,10 +74,6 @@ fn random_state() -> String {
     let mut raw = [0u8; 16];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut raw);
     b64url(&raw)
-}
-
-fn keyring_entry(service: &str, account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(service, account).map_err(|e| e.to_string())
 }
 
 fn exchange_code(code: &str, verifier: &str) -> Result<TokenResponse, String> {
@@ -180,23 +180,15 @@ pub async fn yahoo_sign_in(app: AppHandle) -> Result<Account, String> {
     let refresh = token
         .refresh_token
         .ok_or_else(|| "no refresh token returned".to_string())?;
-    keyring_entry(KEYRING_SERVICE, &email)?
-        .set_password(&refresh)
-        .map_err(|e| e.to_string())?;
-    keyring_entry(KEYRING_ACTIVE, "yahoo")?
-        .set_password(&email)
-        .map_err(|e| e.to_string())?;
+    store::store(&app, KEYRING_SERVICE, &email, &refresh)?;
+    store::store(&app, KEYRING_ACTIVE, "yahoo", &email)?;
     Ok(Account { email })
 }
 
 /// The signed-in Yahoo account, if any.
 #[tauri::command]
-pub fn yahoo_account() -> Result<Option<String>, String> {
-    match keyring_entry(KEYRING_ACTIVE, "yahoo")?.get_password() {
-        Ok(email) => Ok(Some(email)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+pub fn yahoo_account(app: AppHandle) -> Result<Option<String>, String> {
+    store::load(&app, KEYRING_ACTIVE, "yahoo")
 }
 
 struct XOAuth2 {
@@ -211,18 +203,38 @@ impl imap::Authenticator for XOAuth2 {
     }
 }
 
+type ImapTls = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+
+/// A rustls-backed TLS stream (pure Rust — works on desktop and Android).
+fn tls_stream(host: &str, port: u16) -> Result<ImapTls, String> {
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config = rustls::ClientConfig::builder_with_provider(Arc::new(
+        rustls::crypto::ring::default_provider(),
+    ))
+    .with_safe_default_protocol_versions()
+    .map_err(|e| e.to_string())?
+    .with_root_certificates(roots)
+    .with_no_client_auth();
+    let server_name =
+        rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
+    let conn = rustls::ClientConnection::new(Arc::new(config), server_name)
+        .map_err(|e| e.to_string())?;
+    let sock = TcpStream::connect((host, port)).map_err(|e| e.to_string())?;
+    Ok(rustls::StreamOwned::new(conn, sock))
+}
+
 /// Read the latest inbox headers over IMAP with XOAUTH2.
 #[tauri::command]
-pub fn yahoo_inbox(email: String, limit: u32) -> Result<Vec<HeaderJson>, String> {
-    let refresh = keyring_entry(KEYRING_SERVICE, &email)?
-        .get_password()
-        .map_err(|e| e.to_string())?;
+pub fn yahoo_inbox(app: AppHandle, email: String, limit: u32) -> Result<Vec<HeaderJson>, String> {
+    let refresh = store::load(&app, KEYRING_SERVICE, &email)?
+        .ok_or_else(|| "not signed in".to_string())?;
     let token = refresh_access(&refresh)?;
 
-    let tls = native_tls::TlsConnector::builder()
-        .build()
-        .map_err(|e| e.to_string())?;
-    let client = imap::connect((IMAP_HOST, IMAP_PORT), IMAP_HOST, &tls).map_err(|e| e.to_string())?;
+    let tls = tls_stream(IMAP_HOST, IMAP_PORT)?;
+    let mut client = imap::Client::new(tls);
+    client.read_greeting().map_err(|e| e.to_string())?;
     let auth = XOAuth2 { user: email, access_token: token.access_token };
     let mut session = client
         .authenticate("XOAUTH2", &auth)
