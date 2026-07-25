@@ -6,6 +6,10 @@ description = "Emeli-mail desktop shell"
 authors = ["igor-ganov"]
 license = "MIT"
 
+[lib]
+name = "emeli_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -18,7 +22,7 @@ sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
 url = "2"
-imap = "2.4"
+imap = { version = "2.4", default-features = false }
 rustls = { version = "0.23", features = ["ring"] }
 webpki-roots = "0.26"
 
