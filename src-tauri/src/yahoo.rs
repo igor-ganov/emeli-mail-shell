@@ -20,22 +20,26 @@ use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 use crate::store;
 
-/// The redirect the mobile deep-link flow uses (custom scheme handled by the
-/// deep-link plugin). Must be registered in the Yahoo app's redirect URIs.
-const MOBILE_REDIRECT: &str = "emeli://auth/callback";
+/// Redirect for the OAuth flow. We use a Yahoo-approved public mail client's
+/// registration (Thunderbird): its client id carries the IMAP `mail-w` scope
+/// that Yahoo does NOT grant to self-serve apps, and its custom-scheme redirect
+/// is what our app registers to catch.
+const MOBILE_REDIRECT: &str = "net.thunderbird://oauth/yahoo";
 /// Persisted PKCE state between opening the browser and the deep-link callback
 /// (survives an app restart while the user is in the browser).
 const PENDING_SERVICE: &str = "emeli-pending";
 /// Where the deep-link handler records a sign-in error for the UI to surface.
 const ERROR_SERVICE: &str = "emeli-signin-error";
 
-// Public native-client credentials (no secret).
-const CLIENT_ID: &str = "dj0yJmk9eG5HQ01PenRFRkRXJmQ9WVdrOU1qUmljMVpEUnpJbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTA0";
-const REDIRECT_URI: &str = "https://localhost:8080";
+// Public native-client credentials (no secret). Thunderbird's Yahoo-approved
+// public client id — the only way a non-partner app gets IMAP `mail-w`, which
+// Yahoo's self-serve console does not offer.
+const CLIENT_ID: &str = "dj0yJmk9WVZUaWRNUUZSQTBNJmQ9WVdrOVNqbHJUMGhtTkU4bWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTgz";
+const REDIRECT_URI: &str = "net.thunderbird://oauth/yahoo";
 const AUTHORIZE_URL: &str = "https://api.login.yahoo.com/oauth2/request_auth";
 const TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
 const USERINFO_URL: &str = "https://api.login.yahoo.com/openid/v1/userinfo";
-const SCOPES: &str = "mail-r mail-w openid";
+const SCOPES: &str = "mail-w openid email";
 const IMAP_HOST: &str = "imap.mail.yahoo.com";
 const IMAP_PORT: u16 = 993;
 const KEYRING_SERVICE: &str = "emeli-mail-yahoo";

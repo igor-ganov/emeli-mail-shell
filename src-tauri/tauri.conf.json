@@ -26,12 +26,12 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["emeli"]
+        "schemes": ["net.thunderbird"]
       },
       "mobile": [
         {
-          "scheme": ["emeli"],
-          "host": "auth"
+          "scheme": ["net.thunderbird"],
+          "host": "oauth"
         }
       ]
     }
