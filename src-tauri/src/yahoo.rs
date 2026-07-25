@@ -30,7 +30,7 @@ const PENDING_SERVICE: &str = "emeli-pending";
 const ERROR_SERVICE: &str = "emeli-signin-error";
 
 // Public native-client credentials (no secret).
-const CLIENT_ID: &str = "dj0yJmk9R1NjcjlKQloxTGVWJmQ9WVdrOVNEUXdSR3RaZUd3bWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PWNj";
+const CLIENT_ID: &str = "dj0yJmk9eG5HQ01PenRFRkRXJmQ9WVdrOU1qUmljMVpEUnpJbWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PTA0";
 const REDIRECT_URI: &str = "https://localhost:8080";
 const AUTHORIZE_URL: &str = "https://api.login.yahoo.com/oauth2/request_auth";
 const TOKEN_URL: &str = "https://api.login.yahoo.com/oauth2/get_token";
