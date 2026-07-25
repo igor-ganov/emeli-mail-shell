@@ -36,11 +36,27 @@ pub fn run() {
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
                 let handle = app.handle().clone();
+
+                // The token exchange + IMAP are blocking network calls, so they
+                // must run OFF the main thread — doing them in the callback would
+                // ANR (freeze) the app. Spawn a worker per callback URL.
+                let warm = handle.clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
-                        yahoo::handle_deep_link(&handle, url.as_str());
+                        let h = warm.clone();
+                        let u = url.to_string();
+                        std::thread::spawn(move || yahoo::handle_deep_link(&h, &u));
                     }
                 });
+
+                // Cold start: the app was launched by the deep link itself.
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    for url in urls {
+                        let h = handle.clone();
+                        let u = url.to_string();
+                        std::thread::spawn(move || yahoo::handle_deep_link(&h, &u));
+                    }
+                }
             }
             let _ = app;
             Ok(())
