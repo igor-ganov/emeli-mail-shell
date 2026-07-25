@@ -367,18 +367,25 @@ pub fn yahoo_inbox(app: AppHandle, email: String, limit: u32) -> Result<Vec<Head
     result
 }
 
-fn yahoo_inbox_inner(app: &AppHandle, email: &str, limit: u32) -> Result<Vec<HeaderJson>, String> {
+/// Decode an RFC 2047 encoded-word header (e.g. `=?UTF-8?Q?...?=`) into text.
+fn decode_header(bytes: &[u8]) -> String {
+    rfc2047_decoder::decode(bytes).unwrap_or_else(|_| String::from_utf8_lossy(bytes).to_string())
+}
+
+/// Open an authenticated IMAP session (XOAUTH2 with the stored token).
+fn imap_session(app: &AppHandle, email: &str) -> Result<imap::Session<ImapTls>, String> {
     let refresh = store::load(app, KEYRING_SERVICE, email)?
         .ok_or_else(|| "not signed in".to_string())?;
     let token = refresh_access(&refresh)?;
-
     let tls = tls_stream(IMAP_HOST, IMAP_PORT)?;
     let mut client = imap::Client::new(tls);
     client.read_greeting().map_err(|e| e.to_string())?;
     let auth = XOAuth2 { user: email.to_string(), access_token: token.access_token };
-    let mut session = client
-        .authenticate("XOAUTH2", &auth)
-        .map_err(|(e, _)| e.to_string())?;
+    client.authenticate("XOAUTH2", &auth).map_err(|(e, _)| e.to_string())
+}
+
+fn yahoo_inbox_inner(app: &AppHandle, email: &str, limit: u32) -> Result<Vec<HeaderJson>, String> {
+    let mut session = imap_session(app, email)?;
 
     let mailbox = session.select("INBOX").map_err(|e| e.to_string())?;
     let total = mailbox.exists;
@@ -393,13 +400,13 @@ fn yahoo_inbox_inner(app: &AppHandle, email: &str, limit: u32) -> Result<Vec<Hea
         let envelope = fetch.envelope();
         let subject = envelope
             .and_then(|e| e.subject.as_ref())
-            .map(|s| String::from_utf8_lossy(s).to_string())
+            .map(|s| decode_header(s))
             .unwrap_or_default();
         let sender = envelope
             .and_then(|e| e.from.as_ref())
             .and_then(|addrs| addrs.first())
             .map(|a| {
-                let name = a.name.as_ref().map(|n| String::from_utf8_lossy(n).to_string());
+                let name = a.name.as_ref().map(|n| decode_header(n));
                 let mailbox = a.mailbox.as_ref().map(|m| String::from_utf8_lossy(m).to_string());
                 let host = a.host.as_ref().map(|h| String::from_utf8_lossy(h).to_string());
                 match (name, mailbox, host) {
@@ -430,4 +437,46 @@ fn yahoo_inbox_inner(app: &AppHandle, email: &str, limit: u32) -> Result<Vec<Hea
     let _ = session.logout();
     out.reverse(); // newest first
     Ok(out)
+}
+
+#[derive(Serialize)]
+pub struct BodyJson {
+    pub html: Option<String>,
+    pub text: Option<String>,
+}
+
+/// Fetch and parse a message body (HTML/text) by UID.
+#[tauri::command]
+pub fn yahoo_body(app: AppHandle, email: String, uid: String) -> Result<BodyJson, String> {
+    store::append_log(&app, &format!("imap: fetching body uid={}", uid));
+    let mut session = imap_session(&app, &email)?;
+    session.select("INBOX").map_err(|e| e.to_string())?;
+    let fetches = session
+        .uid_fetch(&uid, "BODY.PEEK[]")
+        .map_err(|e| e.to_string())?;
+    let fetch = fetches
+        .iter()
+        .next()
+        .ok_or_else(|| "message not found".to_string())?;
+    let raw = fetch.body().ok_or_else(|| "no body returned".to_string())?;
+    let parsed = mail_parser::MessageParser::default()
+        .parse(raw)
+        .ok_or_else(|| "failed to parse message".to_string())?;
+    let html = parsed.body_html(0).map(|c| c.into_owned());
+    let text = parsed.body_text(0).map(|c| c.into_owned());
+    let _ = session.logout();
+    Ok(BodyJson { html, text })
+}
+
+/// Mark a message read/unread by UID (IMAP \Seen flag).
+#[tauri::command]
+pub fn yahoo_mark_read(app: AppHandle, email: String, uid: String, read: bool) -> Result<(), String> {
+    let mut session = imap_session(&app, &email)?;
+    session.select("INBOX").map_err(|e| e.to_string())?;
+    let op = if read { "+FLAGS" } else { "-FLAGS" };
+    session
+        .uid_store(&uid, format!("{} (\\Seen)", op))
+        .map_err(|e| e.to_string())?;
+    let _ = session.logout();
+    Ok(())
 }

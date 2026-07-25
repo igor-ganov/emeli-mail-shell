@@ -5,7 +5,15 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import { ok, err, mailError } from '@emeli/core';
-import type { MailPort, MailResult, Folder, MessageHeader, Page, MessageQuery } from '@emeli/core';
+import type {
+  MailPort,
+  MailResult,
+  Folder,
+  MessageHeader,
+  MessageBody,
+  Page,
+  MessageQuery,
+} from '@emeli/core';
 
 type HeaderJson = {
   readonly uid: string;
@@ -48,8 +56,43 @@ export const createYahooPort = (email: string): MailPort => ({
     }
   },
 
-  getBody: () => notYet('reading the body'),
-  markRead: () => notYet('marking read'),
+  getBody: async (id): MailResult<MessageBody> => {
+    try {
+      const body = await invoke<{ html: string | null; text: string | null }>('yahoo_body', {
+        email,
+        uid: id,
+      });
+      return ok({
+        id,
+        html: body.html ?? undefined,
+        text: body.text ?? undefined,
+        remoteContent: 'blocked',
+      });
+    } catch (cause) {
+      return err(mailError('network', String(cause)));
+    }
+  },
+
+  markRead: async (id, read): MailResult<MessageHeader> => {
+    try {
+      await invoke('yahoo_mark_read', { email, uid: id, read });
+    } catch {
+      // best-effort; the UI already updated locally
+    }
+    return ok({
+      id,
+      folderId: 'inbox',
+      from: { email: '' },
+      to: [],
+      subject: '',
+      snippet: '',
+      date: 0,
+      unread: !read,
+      flagged: false,
+      hasAttachments: false,
+    });
+  },
+
   setFlag: () => notYet('flagging'),
   send: () => notYet('sending'),
 

@@ -350,6 +350,8 @@ export class EmeliApp extends LitElement {
   private useAccount = async (email: string): Promise<void> => {
     this.account = email;
     this.port = portForAccount(email);
+    const folders = await this.port.listFolders();
+    if (folders.ok) this.folders = folders.value;
     await this.loadFolder('inbox');
   };
 
@@ -424,23 +426,20 @@ export class EmeliApp extends LitElement {
   private async open(id: string): Promise<void> {
     this.selectedId = id;
     this.view = 'reader';
+    // Mark read in the list locally — no full re-fetch (that was the slowdown).
+    this.items = this.items.map((i) => (i.id === id ? { ...i, unread: false } : i));
+    this.rawBody = undefined;
+    this.bodyHtml = '';
+    this.bodyBlocked = 0;
     const body = await this.port.getBody(id);
+    if (this.selectedId !== id) return; // user moved on while loading
     if (body.ok) {
       this.rawBody = body.value;
       this.renderBody(body.value, false);
     } else {
-      this.rawBody = undefined;
-      this.bodyHtml = '';
-      this.bodyBlocked = 0;
+      this.bodyHtml = '<p>Could not load this message.</p>';
     }
-    await this.port.markRead(id, true);
-    await this.loadFolderKeepingSelection(this.activeFolder, id);
-  }
-
-  private async loadFolderKeepingSelection(folderId: string, keep: string): Promise<void> {
-    const page = await this.port.listMessages({ folderId, limit: 100 });
-    if (page.ok) this.items = page.value.items.map(toListItem);
-    this.selectedId = keep;
+    void this.port.markRead(id, true); // best-effort, in the background
   }
 
   private loadRemote = (): void => {

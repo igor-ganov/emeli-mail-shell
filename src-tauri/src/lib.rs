@@ -69,7 +69,9 @@ pub fn run() {
             yahoo::yahoo_account,
             yahoo::yahoo_signin_error,
             yahoo::yahoo_log,
-            yahoo::yahoo_inbox
+            yahoo::yahoo_inbox,
+            yahoo::yahoo_body,
+            yahoo::yahoo_mark_read
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Emeli shell");

@@ -27,6 +27,8 @@ url = "2"
 imap = { version = "2.4", default-features = false }
 rustls = { version = "0.23", features = ["ring"] }
 webpki-roots = "0.26"
+mail-parser = "0.9"
+rfc2047-decoder = "1"
 
 [profile.release]
 opt-level = "s"
