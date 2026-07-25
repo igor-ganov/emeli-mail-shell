@@ -39,61 +39,84 @@ export class EmeliApp extends LitElement {
       font-family: var(--emeli-font-sans, system-ui);
       color: var(--emeli-color-text-primary, #111);
       background: var(--emeli-color-background, #fff);
+      overflow: hidden;
     }
     header.bar {
       display: flex;
-      gap: var(--emeli-space-xs, 0.5rem);
-      align-items: center;
-      padding: var(--emeli-space-xs, 0.5rem) var(--emeli-space-sm, 1rem);
+      flex-direction: column;
+      gap: 0.45rem;
+      padding: 0.5rem 0.75rem;
       border-block-end: 1px solid var(--emeli-color-border, #e5e5e5);
       background: var(--emeli-color-surface, #f7f7f7);
+    }
+    .bar-top {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      min-inline-size: 0;
     }
     .brand {
       font-weight: var(--emeli-font-weight-bold, 700);
       color: var(--emeli-color-brand, #c0491f);
       margin-inline-end: auto;
+      font-size: 1.05rem;
+    }
+    .folders {
+      display: flex;
+      gap: 0.25rem;
+      overflow-x: auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .folders::-webkit-scrollbar {
+      display: none;
     }
     .folder {
       all: unset;
+      flex: 0 0 auto;
       cursor: pointer;
       padding: 0.3rem 0.7rem;
-      border-radius: var(--emeli-radius-sm, 0.5rem);
+      border-radius: var(--emeli-radius-full, 999px);
       color: var(--emeli-color-text-secondary, #555);
       white-space: nowrap;
+      font-size: 0.9rem;
     }
     .folder[aria-current='true'] {
       background: var(--emeli-color-surface-sunken, #eee);
       color: var(--emeli-color-text-primary, #111);
       font-weight: var(--emeli-font-weight-medium, 500);
     }
-    .compose {
-      all: unset;
-      cursor: pointer;
-      margin-inline-start: var(--emeli-space-sm, 1rem);
-      padding: 0.35rem 0.9rem;
-      border-radius: var(--emeli-radius-sm, 0.5rem);
-      background: var(--emeli-color-brand, #c0491f);
-      color: var(--emeli-color-on-brand, #fff);
-      font-weight: var(--emeli-font-weight-medium, 500);
-    }
+    .compose,
     .signin {
       all: unset;
       cursor: pointer;
-      margin-inline-start: var(--emeli-space-xs, 0.5rem);
-      padding: 0.35rem 0.9rem;
+      white-space: nowrap;
+      flex: 0 0 auto;
+      padding: 0.35rem 0.8rem;
       border-radius: var(--emeli-radius-sm, 0.5rem);
+      font-weight: var(--emeli-font-weight-medium, 500);
+      font-size: 0.9rem;
+    }
+    .compose {
+      background: var(--emeli-color-brand, #c0491f);
+      color: var(--emeli-color-on-brand, #fff);
+    }
+    .signin {
       border: 1px solid var(--emeli-color-brand, #c0491f);
       color: var(--emeli-color-brand, #c0491f);
-      font-weight: var(--emeli-font-weight-medium, 500);
     }
     .signin[disabled] {
       opacity: 0.6;
       cursor: default;
     }
     .account {
-      margin-inline-start: var(--emeli-space-xs, 0.5rem);
       color: var(--emeli-color-text-secondary, #555);
-      font-size: var(--emeli-font-size-sm, 0.875rem);
+      font-size: 0.8rem;
+      max-inline-size: 40vw;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 0 1 auto;
     }
     emeli-compose {
       display: block;
@@ -138,36 +161,68 @@ export class EmeliApp extends LitElement {
       display: grid;
       grid-template-columns: 1fr;
       min-block-size: 0;
+      min-inline-size: 0;
     }
     .list {
       overflow: auto;
-      border-inline-end: 1px solid var(--emeli-color-border, #e5e5e5);
+      min-inline-size: 0;
     }
     .reader {
       overflow: auto;
       padding: var(--emeli-space-sm, 1rem);
+      min-inline-size: 0;
     }
     .reader h1 {
       font-size: var(--emeli-font-size-lg, 1.125rem);
       margin: 0 0 0.25rem;
+      overflow-wrap: anywhere;
     }
     .reader .from {
       color: var(--emeli-color-text-secondary, #555);
       font-size: var(--emeli-font-size-sm, 0.875rem);
       margin-block-end: var(--emeli-space-sm, 1rem);
+      overflow-wrap: anywhere;
+    }
+    .back {
+      all: unset;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      color: var(--emeli-color-brand, #c0491f);
+      font-weight: var(--emeli-font-weight-medium, 500);
+      margin-block-end: 0.75rem;
     }
     .empty {
       display: grid;
       place-items: center;
       color: var(--emeli-color-text-tertiary, #888);
       padding: var(--emeli-space-xl, 3rem);
+      block-size: 100%;
     }
+
+    /* Mobile drill-down: one pane at a time, switched by data-view. */
+    :host([data-view='list']) .reader {
+      display: none;
+    }
+    :host([data-view='reader']) .list {
+      display: none;
+    }
+
     @media (min-width: 900px) {
       .panes {
         grid-template-columns: 24rem 1fr;
       }
       .list {
-        overflow: auto;
+        border-inline-end: 1px solid var(--emeli-color-border, #e5e5e5);
+      }
+      /* Both panes always visible on wide screens. */
+      :host([data-view='list']) .reader,
+      :host([data-view='reader']) .list {
+        display: block;
+      }
+      .back {
+        display: none;
       }
     }
   `;
@@ -186,19 +241,30 @@ export class EmeliApp extends LitElement {
   @state() private sending = false;
   @state() private account: string | undefined;
   @state() private signingIn = false;
+  /** Which pane is active on a narrow (mobile) screen. */
+  @state() private view: 'list' | 'reader' = 'list';
+  @state() private signInError: string | undefined;
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this.setAttribute('data-view', 'list');
     void this.init();
   }
 
   protected override updated(): void {
+    this.setAttribute('data-view', this.view);
     const list = this.renderRoot.querySelector('emeli-message-list');
     const shadow = list?.shadowRoot;
     if (shadow !== null && shadow !== undefined && !shadow.adoptedStyleSheets.includes(rowThemeSheet)) {
       shadow.adoptedStyleSheets = [...shadow.adoptedStyleSheets, rowThemeSheet];
     }
   }
+
+  private back = (): void => {
+    this.view = 'list';
+    this.composing = false;
+    this.selectedId = undefined;
+  };
 
   private async init(): Promise<void> {
     const account = await getYahooAccount();
@@ -213,11 +279,14 @@ export class EmeliApp extends LitElement {
 
   private signIn = async (): Promise<void> => {
     this.signingIn = true;
+    this.signInError = undefined;
     try {
       const account = await signInYahoo();
       this.account = account;
       this.port = portForAccount(account);
       await this.loadFolder('inbox');
+    } catch (cause) {
+      this.signInError = String(cause).replace(/^Error:\s*/, '');
     } finally {
       this.signingIn = false;
     }
@@ -225,6 +294,7 @@ export class EmeliApp extends LitElement {
 
   private async loadFolder(id: string): Promise<void> {
     this.activeFolder = id;
+    this.view = 'list';
     this.selectedId = undefined;
     this.rawBody = undefined;
     this.bodyHtml = '';
@@ -243,6 +313,7 @@ export class EmeliApp extends LitElement {
 
   private async open(id: string): Promise<void> {
     this.selectedId = id;
+    this.view = 'reader';
     const body = await this.port.getBody(id);
     if (body.ok) {
       this.rawBody = body.value;
@@ -268,10 +339,12 @@ export class EmeliApp extends LitElement {
 
   private startCompose = (): void => {
     this.composing = true;
+    this.view = 'reader';
   };
 
   private cancelCompose = (): void => {
     this.composing = false;
+    this.view = 'list';
   };
 
   private onSend = async (event: CustomEvent<SendDetail>): Promise<void> => {
@@ -280,6 +353,7 @@ export class EmeliApp extends LitElement {
     this.sending = false;
     this.composing = false;
     if (receipt.ok) await this.loadFolder('sent');
+    else this.view = 'list';
   };
 
   private get selectedItem(): MessageListItem | undefined {
@@ -292,8 +366,13 @@ export class EmeliApp extends LitElement {
     }
     if (!isTauri()) return nothing;
     return html`
-      <button class="signin" ?disabled=${this.signingIn} @click=${this.signIn}>
-        ${this.signingIn ? 'Signing in…' : 'Sign in with Yahoo'}
+      <button
+        class="signin"
+        ?disabled=${this.signingIn}
+        title=${this.signInError ?? ''}
+        @click=${this.signIn}
+      >
+        ${this.signingIn ? 'Signing in…' : this.signInError !== undefined ? 'Sign-in unavailable' : 'Sign in with Yahoo'}
       </button>
     `;
   }
@@ -326,20 +405,24 @@ export class EmeliApp extends LitElement {
   override render() {
     return html`
       <header class="bar">
-        <span class="brand">emeli</span>
-        ${this.folders.map(
-          (f) => html`
-            <button
-              class="folder"
-              aria-current=${f.id === this.activeFolder ? 'true' : 'false'}
-              @click=${() => this.loadFolder(f.id)}
-            >
-              ${f.name}${f.unreadCount > 0 ? html` (${f.unreadCount})` : nothing}
-            </button>
-          `,
-        )}
-        <button class="compose" @click=${this.startCompose}>Compose</button>
-        ${this.renderAccount()}
+        <div class="bar-top">
+          <span class="brand">emeli</span>
+          <button class="compose" @click=${this.startCompose}>Compose</button>
+          ${this.renderAccount()}
+        </div>
+        <div class="folders">
+          ${this.folders.map(
+            (f) => html`
+              <button
+                class="folder"
+                aria-current=${f.id === this.activeFolder ? 'true' : 'false'}
+                @click=${() => this.loadFolder(f.id)}
+              >
+                ${f.name}${f.unreadCount > 0 ? html` (${f.unreadCount})` : nothing}
+              </button>
+            `,
+          )}
+        </div>
       </header>
       <div class="panes">
         <div class="list">
@@ -349,7 +432,10 @@ export class EmeliApp extends LitElement {
             @emeli-select=${(e: CustomEvent<{ id: string }>) => this.open(e.detail.id)}
           ></emeli-message-list>
         </div>
-        <div class="reader">${this.composing ? this.renderCompose() : this.renderReader()}</div>
+        <div class="reader">
+          <button class="back" @click=${this.back}>← Back</button>
+          ${this.composing ? this.renderCompose() : this.renderReader()}
+        </div>
       </div>
     `;
   }

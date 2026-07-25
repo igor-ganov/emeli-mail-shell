@@ -173,6 +173,12 @@ async fn authorize(app: &AppHandle, verifier_challenge: (&str, &str)) -> Result<
 /// `Sign in with Yahoo`: full public-client PKCE flow, stores the refresh token.
 #[tauri::command]
 pub async fn yahoo_sign_in(app: AppHandle) -> Result<Account, String> {
+    // The desktop flow opens a separate login window; that has no equivalent on
+    // mobile yet, so fail cleanly instead of opening a blank window.
+    if cfg!(mobile) {
+        let _ = &app;
+        return Err("Sign-in on mobile is coming soon — a Custom Tab / deep-link flow is in progress.".to_string());
+    }
     let (verifier, challenge) = pkce();
     let code = authorize(&app, (&verifier, &challenge)).await?;
     let token = exchange_code(&code, &verifier)?;
