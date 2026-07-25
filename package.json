@@ -30,6 +30,7 @@
     "@emeli/ui-message-body": "file:../emeli-mail-ui-message-body",
     "@emeli/ui-message-list": "file:../emeli-mail-ui-message-list",
     "@emeli/ui-message-row": "file:../emeli-mail-ui-message-row",
+    "@tauri-apps/api": "^2.0.0",
     "astro": "^5.6.0",
     "lit": "^3.3.2"
   },

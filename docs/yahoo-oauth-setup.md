@@ -1,7 +1,12 @@
 # Connecting a real Yahoo account
 
-Two ways to give Emeli a live Yahoo connection. Read the caveat first — it
-decides which one you actually want.
+**End users do nothing but click "Sign in with Yahoo" in the app.** The app opens
+the Yahoo login window, captures the redirect itself, and stores the token in the
+OS keychain — no `.env`, no pasted URLs, no per-user config. The `client_id` is a
+public app-level constant baked into the shell (`src-tauri/src/yahoo.rs`).
+
+The rest of this document is **one-time developer setup** (registering the Yahoo
+app) plus a caveat that decides whether OAuth is usable yet.
 
 ## The caveat (read this)
 

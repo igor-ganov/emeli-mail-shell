@@ -5,6 +5,8 @@
 // shell to store/load them through these IPC commands.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod yahoo;
+
 use keyring::{Entry, Error as KeyringError};
 
 fn entry(service: &str, account: &str) -> Result<Entry, String> {
@@ -44,7 +46,10 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             secure_store,
             secure_load,
-            secure_delete
+            secure_delete,
+            yahoo::yahoo_sign_in,
+            yahoo::yahoo_account,
+            yahoo::yahoo_inbox
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Emeli shell");

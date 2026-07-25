@@ -5,7 +5,13 @@ import type { MailPort, Folder, MessageBody } from '@emeli/core';
 import type { MessageListItem } from '@emeli/ui-message-list';
 import type { SendDetail } from '@emeli/ui-compose';
 import rowThemeCss from '@emeli/theme-terracotta/message-row?raw';
-import { createMailPort } from './mail/provider.js';
+import {
+  createDemoPort,
+  isTauri,
+  getYahooAccount,
+  signInYahoo,
+  portForAccount,
+} from './mail/provider.js';
 import { toListItem, textToHtml } from './lib/to-list-item.js';
 
 // The rows live inside <emeli-message-list>'s shadow root, so document-level
@@ -69,6 +75,25 @@ export class EmeliApp extends LitElement {
       background: var(--emeli-color-brand, #c0491f);
       color: var(--emeli-color-on-brand, #fff);
       font-weight: var(--emeli-font-weight-medium, 500);
+    }
+    .signin {
+      all: unset;
+      cursor: pointer;
+      margin-inline-start: var(--emeli-space-xs, 0.5rem);
+      padding: 0.35rem 0.9rem;
+      border-radius: var(--emeli-radius-sm, 0.5rem);
+      border: 1px solid var(--emeli-color-brand, #c0491f);
+      color: var(--emeli-color-brand, #c0491f);
+      font-weight: var(--emeli-font-weight-medium, 500);
+    }
+    .signin[disabled] {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .account {
+      margin-inline-start: var(--emeli-space-xs, 0.5rem);
+      color: var(--emeli-color-text-secondary, #555);
+      font-size: var(--emeli-font-size-sm, 0.875rem);
     }
     emeli-compose {
       display: block;
@@ -147,7 +172,7 @@ export class EmeliApp extends LitElement {
     }
   `;
 
-  private port: MailPort = createMailPort();
+  private port: MailPort = createDemoPort();
   private rawBody: MessageBody | undefined;
 
   @state() private folders: readonly Folder[] = [];
@@ -159,6 +184,8 @@ export class EmeliApp extends LitElement {
   @state() private bodyAllowRemote = false;
   @state() private composing = false;
   @state() private sending = false;
+  @state() private account: string | undefined;
+  @state() private signingIn = false;
 
   override connectedCallback(): void {
     super.connectedCallback();
@@ -174,10 +201,27 @@ export class EmeliApp extends LitElement {
   }
 
   private async init(): Promise<void> {
+    const account = await getYahooAccount();
+    if (account !== undefined) {
+      this.account = account;
+      this.port = portForAccount(account);
+    }
     const folders = await this.port.listFolders();
     if (folders.ok) this.folders = folders.value;
     await this.loadFolder(this.activeFolder);
   }
+
+  private signIn = async (): Promise<void> => {
+    this.signingIn = true;
+    try {
+      const account = await signInYahoo();
+      this.account = account;
+      this.port = portForAccount(account);
+      await this.loadFolder('inbox');
+    } finally {
+      this.signingIn = false;
+    }
+  };
 
   private async loadFolder(id: string): Promise<void> {
     this.activeFolder = id;
@@ -242,6 +286,18 @@ export class EmeliApp extends LitElement {
     return this.items.find((i) => i.id === this.selectedId);
   }
 
+  private renderAccount() {
+    if (this.account !== undefined) {
+      return html`<span class="account" title="Signed in">${this.account}</span>`;
+    }
+    if (!isTauri()) return nothing;
+    return html`
+      <button class="signin" ?disabled=${this.signingIn} @click=${this.signIn}>
+        ${this.signingIn ? 'Signing in…' : 'Sign in with Yahoo'}
+      </button>
+    `;
+  }
+
   private renderCompose() {
     return html`
       <emeli-compose
@@ -283,6 +339,7 @@ export class EmeliApp extends LitElement {
           `,
         )}
         <button class="compose" @click=${this.startCompose}>Compose</button>
+        ${this.renderAccount()}
       </header>
       <div class="panes">
         <div class="list">
