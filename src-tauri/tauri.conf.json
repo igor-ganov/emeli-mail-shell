@@ -23,6 +23,19 @@
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'"
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["emeli"]
+      },
+      "mobile": [
+        {
+          "scheme": ["emeli"],
+          "host": "auth"
+        }
+      ]
+    }
+  },
   "bundle": {
     "active": false,
     "targets": "all",

@@ -29,6 +29,25 @@ fn secure_delete(app: AppHandle, service: String, account: String) -> Result<(),
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .manage(yahoo::AuthChannel::default())
+        .setup(|app| {
+            #[cfg(mobile)]
+            {
+                use tauri::Manager;
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    if let Some(url) = event.urls().into_iter().next() {
+                        let channel = handle.state::<yahoo::AuthChannel>();
+                        yahoo::deliver_callback(channel.inner(), url.to_string());
+                    }
+                });
+            }
+            let _ = app;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             secure_store,
             secure_load,

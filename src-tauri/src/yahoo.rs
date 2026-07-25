@@ -8,14 +8,25 @@
 
 use std::net::TcpStream;
 use std::sync::mpsc::channel;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, State};
+#[cfg(desktop)]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 use crate::store;
+
+/// The redirect the mobile deep-link flow uses (custom scheme handled by the
+/// deep-link plugin). Must be registered in the Yahoo app's redirect URIs.
+const MOBILE_REDIRECT: &str = "emeli://auth/callback";
+
+/// Delivers the deep-link callback URL from the plugin handler to the awaiting
+/// mobile sign-in. Set before opening the browser, taken when the URL arrives.
+#[derive(Default)]
+pub struct AuthChannel(pub Mutex<Option<std::sync::mpsc::Sender<String>>>);
 
 // Public native-client credentials (no secret).
 const CLIENT_ID: &str = "dj0yJmk9R1NjcjlKQloxTGVWJmQ9WVdrOVNEUXdSR3RaZUd3bWNHbzlNQT09JnM9Y29uc3VtZXJzZWNyZXQmc3Y9MCZ4PWNj";
@@ -76,11 +87,11 @@ fn random_state() -> String {
     b64url(&raw)
 }
 
-fn exchange_code(code: &str, verifier: &str) -> Result<TokenResponse, String> {
+fn exchange_code(code: &str, verifier: &str, redirect: &str) -> Result<TokenResponse, String> {
     post_token(&[
         ("grant_type", "authorization_code"),
         ("code", code),
-        ("redirect_uri", REDIRECT_URI),
+        ("redirect_uri", redirect),
         ("client_id", CLIENT_ID),
         ("code_verifier", verifier),
     ])
@@ -119,7 +130,8 @@ fn fetch_email(access_token: &str) -> Result<String, String> {
     info.email.ok_or_else(|| "userinfo returned no email".to_string())
 }
 
-/// Open the Yahoo login window and resolve the authorization code.
+/// Open the Yahoo login window and resolve the authorization code (desktop).
+#[cfg(desktop)]
 async fn authorize(app: &AppHandle, verifier_challenge: (&str, &str)) -> Result<String, String> {
     let (_verifier, challenge) = verifier_challenge;
     let state = random_state();
@@ -170,18 +182,62 @@ async fn authorize(app: &AppHandle, verifier_challenge: (&str, &str)) -> Result<
     Ok(code)
 }
 
-/// `Sign in with Yahoo`: full public-client PKCE flow, stores the refresh token.
+/// `Sign in with Yahoo` (public-client PKCE, no secret). Desktop opens a login
+/// window and intercepts the redirect; mobile opens the system browser and
+/// receives the code back through the `emeli://auth/callback` deep link.
 #[tauri::command]
-pub async fn yahoo_sign_in(app: AppHandle) -> Result<Account, String> {
-    // The desktop flow opens a separate login window; that has no equivalent on
-    // mobile yet, so fail cleanly instead of opening a blank window.
-    if cfg!(mobile) {
-        let _ = &app;
-        return Err("Sign-in on mobile is coming soon — a Custom Tab / deep-link flow is in progress.".to_string());
-    }
+pub async fn yahoo_sign_in(app: AppHandle, auth_channel: State<'_, AuthChannel>) -> Result<Account, String> {
     let (verifier, challenge) = pkce();
-    let code = authorize(&app, (&verifier, &challenge)).await?;
-    let token = exchange_code(&code, &verifier)?;
+
+    #[cfg(desktop)]
+    let code = {
+        let _ = &auth_channel;
+        authorize(&app, (&verifier, &challenge)).await?
+    };
+
+    #[cfg(mobile)]
+    let code = {
+        use tauri_plugin_opener::OpenerExt;
+        let state = random_state();
+        let url = url::Url::parse_with_params(
+            AUTHORIZE_URL,
+            &[
+                ("client_id", CLIENT_ID),
+                ("redirect_uri", MOBILE_REDIRECT),
+                ("response_type", "code"),
+                ("scope", SCOPES),
+                ("state", state.as_str()),
+                ("code_challenge", challenge.as_str()),
+                ("code_challenge_method", "S256"),
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        let (tx, rx) = channel::<String>();
+        *auth_channel.0.lock().map_err(|e| e.to_string())? = Some(tx);
+        app.opener()
+            .open_url(url.to_string(), None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let callback = tauri::async_runtime::spawn_blocking(move || rx.recv())
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        let parsed = url::Url::parse(&callback).map_err(|e| e.to_string())?;
+        let got_state = parsed
+            .query_pairs()
+            .find(|(k, _)| k == "state")
+            .map(|(_, v)| v.into_owned());
+        if got_state.as_deref() != Some(state.as_str()) {
+            return Err("state mismatch (possible CSRF)".to_string());
+        }
+        parsed
+            .query_pairs()
+            .find(|(k, _)| k == "code")
+            .map(|(_, v)| v.into_owned())
+            .ok_or_else(|| "no code in callback".to_string())?
+    };
+
+    let redirect = if cfg!(mobile) { MOBILE_REDIRECT } else { REDIRECT_URI };
+    let token = exchange_code(&code, &verifier, redirect)?;
     let email = fetch_email(&token.access_token)?;
     let refresh = token
         .refresh_token
@@ -189,6 +245,15 @@ pub async fn yahoo_sign_in(app: AppHandle) -> Result<Account, String> {
     store::store(&app, KEYRING_SERVICE, &email, &refresh)?;
     store::store(&app, KEYRING_ACTIVE, "yahoo", &email)?;
     Ok(Account { email })
+}
+
+/// Feed a received deep-link callback URL to an awaiting mobile sign-in.
+pub fn deliver_callback(channel: &AuthChannel, url: String) {
+    if let Ok(mut guard) = channel.0.lock() {
+        if let Some(tx) = guard.take() {
+            let _ = tx.send(url);
+        }
+    }
 }
 
 /// The signed-in Yahoo account, if any.
